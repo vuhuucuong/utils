@@ -148,19 +148,17 @@ fi
 # Deduplicate by host (keep first source file)
 mapfile -t uniq_lines < <(awk -F '\t' '!seen[$1]++' "$tmp_endpoints")
 
-# Run pings with bounded concurrency, collect results
-running=0
+# Run pings with bounded concurrency, collect results (portable, no wait -n)
 for ln in "${uniq_lines[@]}"; do
+	# Throttle to CONCURRENCY background jobs
+	while (( $(jobs -rp | wc -l) >= CONCURRENCY )); do
+		sleep 0.05
+	done
 	host="${ln%%$'\t'*}"
 	src="${ln#*$'\t'}"
 	(
 		ping_host "$host" "$src" "$COUNT" "$PING_TIMEOUT" >> "$tmp_results"
 	) &
-	((running++))
-	if (( running >= CONCURRENCY )); then
-		wait -n
-		((running--))
-	fi
 done
 wait
 
