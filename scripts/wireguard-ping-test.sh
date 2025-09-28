@@ -164,8 +164,8 @@ wait
 
 # Print sorted results
 if [[ -s "$tmp_results" ]]; then
-	printf '\nResults (sorted by average latency)\n'
-	printf '-----------------------------------\n'
+	printf "\n%s\n" "Results (sorted by average latency)"
+	printf "%s\n" "-----------------------------------"
 	# Format: show "unreachable" for sentinel
 	sort -t $'\t' -k1,1n "$tmp_results" | awk -F '\t' '
 		function fmt(ms) {
