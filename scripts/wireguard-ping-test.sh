@@ -50,7 +50,7 @@ echo "║        WireGuard Endpoint Ping Tester        ║"
 echo "╚══════════════════════════════════════════════╝"
 echo
 echo "  Directory : $CONFIG_DIR"
-echo "  Parallel  : $MAX_JOBS jobs at a time  (3 mtr cycles each)"
+echo "  Parallel  : $MAX_JOBS jobs at a time  (3 ping packets each)"
 echo "  Sort by   : $SORT_BY"
 echo
 echo "Scanning for endpoints..."
@@ -71,20 +71,25 @@ ping_endpoint() {
 
   echo "Testing endpoint: $endpoint (from $(basename "$conf_file"))..."
 
-  # Run mtr: 3 cycles, report mode, skip DNS for intermediate hops. Force -6 for IPv6.
-  if [ $is_ipv6 -eq 1 ]; then
-    mtr_output=$(mtr -6 --report --report-cycles 3 --no-dns "$host" 2>/dev/null)
-  else
-    mtr_output=$(mtr --report --report-cycles 3 --no-dns "$host" 2>/dev/null)
+  local ping_cmd="ping"
+  if [ "$is_ipv6" -eq 1 ] && command -v ping6 >/dev/null 2>&1; then
+    ping_cmd="ping6"
   fi
 
-  # Last line of mtr report is the target host: fields are index, host, Loss%, Snt, Last, Avg, Best, Wrst, StDev
-  last_line=$(echo "$mtr_output" | tail -1)
-  loss=$(echo "$last_line" | awk '{print $3}')
-  avg_ms=$(echo "$last_line" | awk '{print $6}')
-  stdev_ms=$(echo "$last_line" | awk '{print $9}')
+  # Run ping: 3 packets
+  ping_output=$($ping_cmd -c 3 "$host" 2>/dev/null)
 
-  if [ -n "$avg_ms" ] && [ "$loss" != "100.0%" ]; then
+  # Extract stats from the last line (e.g. round-trip min/avg/max/stddev = 24.322/25.032/26.030/0.726 ms)
+  stats_line=$(echo "$ping_output" | tail -1)
+  if [[ "$stats_line" =~ (rtt|round-trip) ]]; then
+    avg_ms=$(echo "$stats_line" | awk -F'[/= ]+' '{print $7}')
+    stdev_ms=$(echo "$stats_line" | awk -F'[/= ]+' '{print $9}')
+  else
+    avg_ms=""
+    stdev_ms=""
+  fi
+
+  if [ -n "$avg_ms" ]; then
     echo "  => Success — avg: ${avg_ms} ms, stdev: ${stdev_ms} ms"
     echo "$avg_ms $stdev_ms $host" >> "$TMPFILE"
   else
@@ -101,9 +106,17 @@ for conf_file in "$CONFIG_DIR"/*.conf; do
     # Extract one or more endpoint hosts from lines like:
     #   Endpoint = host:port
     # Supports host being a domain, IPv4, or bracketed IPv6 like [2001:db8::1]
-    mapfile -t endpoints < <(grep -oP 'Endpoint\s*=\s*\K(\[[^\]]+\]|[^:\s]+)' "$conf_file")
+    endpoints=$(awk '/^[ \t]*Endpoint[ \t]*=/ {
+      sub(/^[ \t]*Endpoint[ \t]*=[ \t]*/, "")
+      if ($0 ~ /^\[/) {
+        sub(/\].*/, "]")
+      } else {
+        sub(/:.*/, "")
+      }
+      print
+    }' "$conf_file")
 
-    for endpoint in "${endpoints[@]}"; do
+    for endpoint in $endpoints; do
       if [ -n "$endpoint" ]; then
         # Throttle to MAX_JOBS concurrent background jobs.
         while [ "$(jobs -rp | wc -l)" -ge "$MAX_JOBS" ]; do
@@ -119,7 +132,7 @@ done
 wait
 
 echo "┌────────────────────────────────────────────────────────────┐"
-printf "│           MTR Summary   (sorted by: %-22s│\n" "$SORT_BY)"
+printf "│           Ping Summary  (sorted by: %-22s│\n" "$SORT_BY)"
 echo "├────────────┬────────────┬──────────────────────────────────┤"
 printf "│ %-10s │ %-10s │ %-32s │\n" "Avg (ms)" "StDev (ms)" "Endpoint"
 echo "├────────────┼────────────┼──────────────────────────────────┤"
