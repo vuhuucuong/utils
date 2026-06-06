@@ -59,8 +59,11 @@ echo
 ping_endpoint() {
   local endpoint="$1"
   local conf_file="$2"
+  local domain
   local host="$endpoint"
   local is_ipv6=0
+
+  domain="$(basename "$conf_file" .conf)"
 
   # Strip brackets for IPv6 like [2001:db8::1] and mark as IPv6
   if [[ "$host" == \[*\] ]]; then
@@ -86,10 +89,10 @@ ping_endpoint() {
 
   if [ -n "$avg_ms" ] && [ "$loss" != "100.0%" ]; then
     echo "  => Success — avg: ${avg_ms} ms, stdev: ${stdev_ms} ms"
-    echo "$avg_ms $stdev_ms $host" >> "$TMPFILE"
+    printf "%s\t%s\t%s\t%s\n" "$avg_ms" "$stdev_ms" "$domain" "$host" >> "$TMPFILE"
   else
     echo "  => Failed: Host unreachable or request timed out."
-    echo "99999 9999 $host (Failed)" >> "$TMPFILE"
+    printf "%s\t%s\t%s\t%s\n" "99999" "9999" "$domain" "$host (Failed)" >> "$TMPFILE"
   fi
   echo
 }
@@ -118,21 +121,19 @@ done
 # Wait for all remaining background jobs to finish.
 wait
 
-echo "┌────────────────────────────────────────────────────────────┐"
-printf "│           MTR Summary   (sorted by: %-22s│\n" "$SORT_BY)"
-echo "├────────────┬────────────┬──────────────────────────────────┤"
-printf "│ %-10s │ %-10s │ %-32s │\n" "Avg (ms)" "StDev (ms)" "Endpoint"
-echo "├────────────┼────────────┼──────────────────────────────────┤"
+printf '┌%*s┐\n' 91 '' | sed 's/ /─/g'
+printf "│ %-89s │\n" "MTR Summary (sorted by: $SORT_BY)"
+echo "├────────────┬────────────┬──────────────────────────────┬──────────────────────────────────┤"
+printf "│ %-10s │ %-10s │ %-28s │ %-32s │\n" "Avg (ms)" "StDev (ms)" "Domain" "Endpoint"
+echo "├────────────┼────────────┼──────────────────────────────┼──────────────────────────────────┤"
 
 # Sort by selected key (primary), with the other as tiebreaker.
 if [ "$SORT_BY" = "stdev" ]; then
-  sort_cmd="sort -k2,2n -k1,1n"
+  sort -t $'\t' -k2,2n -k1,1n "$TMPFILE"
 else
-  sort_cmd="sort -k1,1n -k2,2n"
-fi
-$sort_cmd "$TMPFILE" | while read -r avg stdev host extra; do
-  label="$host${extra:+ $extra}"
-  printf "│ %-10s │ %-10s │ %-32s │\n" "$avg" "$stdev" "$label"
+  sort -t $'\t' -k1,1n -k2,2n "$TMPFILE"
+fi | while IFS=$'\t' read -r avg stdev domain endpoint; do
+  printf "│ %-10s │ %-10s │ %-28s │ %-32s │\n" "$avg" "$stdev" "$domain" "$endpoint"
 done
 
-echo "└────────────┴────────────┴──────────────────────────────────┘"
+echo "└────────────┴────────────┴──────────────────────────────┴──────────────────────────────────┘"
