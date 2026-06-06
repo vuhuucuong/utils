@@ -37,7 +37,7 @@ fi
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
 
-MAX_JOBS=5
+MAX_JOBS=50
 
 # Check if the provided path is a valid directory.
 if [ ! -d "$CONFIG_DIR" ]; then
